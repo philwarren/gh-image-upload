@@ -3,8 +3,15 @@ interface Env {
   UPLOAD_KEY: string;
 }
 
-const SCOPES: Record<string, { allowedReferers: RegExp[]; allowedUserAgents: RegExp[] }> = {
+interface ScopeConfig {
+  description: string;
+  allowedReferers: RegExp[];
+  allowedUserAgents: RegExp[];
+}
+
+const SCOPES: Record<string, ScopeConfig> = {
   gh: {
+    description: "Referer must match *.github.com or *.githubusercontent.com, or User-Agent must match github-camo. Empty referer is allowed.",
     allowedReferers: [
       /^https?:\/\/([a-z0-9-]+\.)*github\.com(\/|$)/i,
       /^https?:\/\/([a-z0-9-]+\.)*githubusercontent\.com(\/|$)/i,
@@ -56,6 +63,19 @@ export default {
       return new Response("User-agent: *\nDisallow: /\n", {
         headers: { "content-type": "text/plain" },
       });
+    }
+
+    // List scopes: GET /api/scopes
+    if (path === "/api/scopes" && request.method === "GET") {
+      const auth = request.headers.get("authorization");
+      if (auth !== `Bearer ${env.UPLOAD_KEY}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      const result = Object.fromEntries(
+        Object.entries(SCOPES).map(([name, config]) => [name, { description: config.description }]),
+      );
+      return Response.json(result);
     }
 
     // Upload: POST /upload/:scope

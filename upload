@@ -17,11 +17,13 @@ AUTH_HEADER="Authorization: Bearer ${UPLOAD_KEY}"
 usage() {
   echo "Usage: upload-image [-s scope] [-d desc] <file>"
   echo "       upload-image list [-s scope]"
+  echo "       upload-image scopes"
   echo "       upload-image delete [-s scope] <filename>"
   echo ""
   echo "Commands:"
   echo "  (default)  Upload an image, returns URL"
   echo "  list       List all images in a scope"
+  echo "  scopes     List available scopes and their access rules"
   echo "  delete     Delete an image by filename (e.g. abc123.png)"
   echo ""
   echo "Options:"
@@ -38,6 +40,7 @@ COMMAND=""
 # Check for subcommand
 case "${1:-}" in
   list)   COMMAND="list"; shift ;;
+  scopes) COMMAND="scopes"; shift ;;
   delete) COMMAND="delete"; shift ;;
   -*)     COMMAND="upload" ;;
   "")     usage ;;
@@ -89,7 +92,13 @@ case "$COMMAND" in
   list)
     RESPONSE=$(curl -s -w "\n%{http_code}" -H "$AUTH_HEADER" "${UPLOAD_URL}/api/${SCOPE}")
     BODY=$(check_response "$RESPONSE" 200)
-    echo "$BODY" | jq -r '.[] | [.uploaded, .key, (.description // "-")] | @tsv' | column -t -s $'\t'
+    echo "$BODY" | jq -r '.[] | [.uploaded, .url, (.description // "-")] | @tsv' | column -t -s $'\t'
+    ;;
+
+  scopes)
+    RESPONSE=$(curl -s -w "\n%{http_code}" -H "$AUTH_HEADER" "${UPLOAD_URL}/api/scopes")
+    BODY=$(check_response "$RESPONSE" 200)
+    echo "$BODY" | jq -r 'to_entries[] | "\(.key)\t\(.value.description)"' | column -t -s $'\t'
     ;;
 
   delete)
