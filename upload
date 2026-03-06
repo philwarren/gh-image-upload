@@ -28,7 +28,7 @@ usage() {
   echo ""
   echo "Options:"
   echo "  -s SCOPE   Scope name (default: gh)"
-  echo "  -d DESC    Description for the upload"
+  echo "  -d DESC    Description for the upload (default: original filename)"
   echo "  -h         Show this help"
   exit 0
 }

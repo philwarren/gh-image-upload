@@ -111,7 +111,7 @@ export default {
         customMetadata: {
           uploadedAt: new Date().toISOString(),
           originalName: file.name,
-          ...(description ? { description: String(description) } : {}),
+          description: description ? String(description) : file.name,
         },
       });
 
