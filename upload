@@ -24,7 +24,7 @@ usage() {
   echo "  (default)  Upload an image, returns URL"
   echo "  list       List all images in a scope"
   echo "  scopes     List available scopes and their access rules"
-  echo "  delete     Delete an image by filename (e.g. abc123.png)"
+  echo "  delete     Delete an image by token (e.g. abc123def4)"
   echo ""
   echo "Options:"
   echo "  -s SCOPE   Scope name (default: gh)"
@@ -92,7 +92,7 @@ case "$COMMAND" in
   list)
     RESPONSE=$(curl -s -w "\n%{http_code}" -H "$AUTH_HEADER" "${UPLOAD_URL}/api/${SCOPE}")
     BODY=$(check_response "$RESPONSE" 200)
-    echo "$BODY" | jq -r '.[] | [.uploaded, .url, (.description // "-")] | @tsv' | column -t -s $'\t'
+    echo "$BODY" | jq -r '.[] | [.uploaded, .url] + (if .description then [.description] else [] end) | @tsv' | column -t -s $'\t'
     ;;
 
   scopes)
@@ -103,7 +103,7 @@ case "$COMMAND" in
 
   delete)
     if [[ $# -ne 1 ]]; then
-      echo "Usage: upload-image delete [-s scope] <filename>" >&2
+      echo "Usage: upload-image delete [-s scope] <token>" >&2
       exit 1
     fi
     FILENAME="$1"

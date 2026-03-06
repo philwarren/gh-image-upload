@@ -104,6 +104,7 @@ export default {
 
       const id = generateId();
       const key = `${scope}/${id}${ext}`;
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
 
       const description = formData.get("description");
       await env.BUCKET.put(key, file.stream(), {
@@ -111,11 +112,11 @@ export default {
         customMetadata: {
           uploadedAt: new Date().toISOString(),
           originalName: file.name,
-          description: description ? String(description) : file.name,
+          ...(description ? { description: String(description) } : {}),
         },
       });
 
-      const resultUrl = `${url.origin}/${key}`;
+      const resultUrl = `${url.origin}/${scope}/${id}/${safeName}`;
       return Response.json({ url: resultUrl, key });
     }
 
@@ -133,12 +134,18 @@ export default {
       do {
         const listed = await env.BUCKET.list({ prefix: `${scope}/`, cursor, include: ["customMetadata"] });
         for (const obj of listed.objects) {
+          const meta = obj.customMetadata || {};
+          const originalName = meta.originalName || obj.key.split("/").pop() || "";
+          const token = (obj.key.split("/").pop() || "").replace(/\.[^.]+$/, "");
           items.push({
             key: obj.key,
-            url: `${url.origin}/${obj.key}`,
+            token,
+            url: `${url.origin}/${scope}/${token}/${originalName}`,
             size: obj.size,
             uploaded: obj.uploaded.toISOString(),
-            ...obj.customMetadata,
+            originalName,
+            ...(meta.description ? { description: meta.description } : {}),
+            ...(meta.uploadedAt ? { uploadedAt: meta.uploadedAt } : {}),
           });
         }
         cursor = listed.truncated ? listed.cursor : undefined;
@@ -147,31 +154,45 @@ export default {
       return Response.json(items);
     }
 
-    // Delete: DELETE /api/:scope/:filename
-    const deleteMatch = path.match(/^\/api\/([a-z0-9-]+)\/([A-Za-z0-9]+\.[a-z]+)$/);
+    // Delete: DELETE /api/:scope/:token (finds by prefix)
+    const deleteMatch = path.match(/^\/api\/([a-z0-9-]+)\/([A-Za-z0-9]+)$/);
     if (deleteMatch && request.method === "DELETE") {
       const auth = request.headers.get("authorization");
       if (auth !== `Bearer ${env.UPLOAD_KEY}`) {
         return new Response("Unauthorized", { status: 401 });
       }
 
-      const key = `${deleteMatch[1]}/${deleteMatch[2]}`;
+      const scope = deleteMatch[1];
+      const token = deleteMatch[2];
+      const listed = await env.BUCKET.list({ prefix: `${scope}/${token}`, limit: 1 });
+      if (!listed.objects.length) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      const key = listed.objects[0].key;
       await env.BUCKET.delete(key);
       return Response.json({ deleted: key });
     }
 
-    // Serve: GET /:scope/:id.ext
-    const serveMatch = path.match(/^\/([a-z0-9-]+)\/([A-Za-z0-9]+\.[a-z]+)$/);
+    // Serve: GET /:scope/:token/:filename (new) or GET /:scope/:id.ext (legacy)
+    const serveNewMatch = path.match(/^\/([a-z0-9-]+)\/([A-Za-z0-9]+)\/[^/]+$/);
+    const serveLegacyMatch = path.match(/^\/([a-z0-9-]+)\/([A-Za-z0-9]+\.[a-z]+)$/);
+    const serveMatch = serveNewMatch || serveLegacyMatch;
     if (serveMatch && (request.method === "GET" || request.method === "HEAD")) {
       const scope = serveMatch[1];
-      const filename = serveMatch[2];
+      const token = serveMatch[2];
 
       if (!checkAccess(scope, request)) {
         return new Response("Forbidden", { status: 403 });
       }
 
-      const key = `${scope}/${filename}`;
-      const object = await env.BUCKET.get(key);
+      // Look up by token prefix — R2 key is always scope/token.ext
+      const listed = await env.BUCKET.list({ prefix: `${scope}/${token}`, limit: 1 });
+      if (!listed.objects.length) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      const object = await env.BUCKET.get(listed.objects[0].key);
       if (!object) {
         return new Response("Not found", { status: 404 });
       }
