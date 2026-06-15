@@ -19,16 +19,22 @@ usage() {
   echo "       upload-image list [-s scope]"
   echo "       upload-image scopes"
   echo "       upload-image delete [-s scope] <filename>"
+  echo "       upload-image badge create <owner/repo#pr> [-d desc]"
+  echo "       upload-image badge list [-d substring]"
+  echo "       upload-image badge delete <token>"
   echo ""
   echo "Commands:"
-  echo "  (default)  Upload an image, returns URL"
-  echo "  list       List all images in a scope"
-  echo "  scopes     List available scopes and their access rules"
-  echo "  delete     Delete an image by token (e.g. abc123def4)"
+  echo "  (default)      Upload an image, returns URL"
+  echo "  list           List all images in a scope"
+  echo "  scopes         List available scopes and their access rules"
+  echo "  delete         Delete an image by token (e.g. abc123def4)"
+  echo "  badge create   Register a PR status badge for a private repo"
+  echo "  badge list     List registered badge tokens"
+  echo "  badge delete   Delete a badge token"
   echo ""
   echo "Options:"
   echo "  -s SCOPE   Scope name (default: gh)"
-  echo "  -d DESC    Description for the upload (default: original filename)"
+  echo "  -d DESC    Description (default: original filename for uploads)"
   echo "  -h         Show this help"
   exit 0
 }
@@ -37,25 +43,39 @@ SCOPE="gh"
 DESC=""
 COMMAND=""
 
+BADGE_SUB=""
+
 # Check for subcommand
 case "${1:-}" in
   list)   COMMAND="list"; shift ;;
   scopes) COMMAND="scopes"; shift ;;
   delete) COMMAND="delete"; shift ;;
+  badge)
+    shift
+    COMMAND="badge"
+    BADGE_SUB="${1:-}"
+    [[ -z "$BADGE_SUB" ]] && usage
+    shift
+    ;;
   -*)     COMMAND="upload" ;;
   "")     usage ;;
   *)      COMMAND="upload" ;;
 esac
 
-while getopts "s:d:h" opt; do
-  case "$opt" in
-    s) SCOPE="$OPTARG" ;;
-    d) DESC="$OPTARG" ;;
-    h) usage ;;
-    *) usage ;;
+# Parse flags from anywhere in the arg list (getopts stops at the first
+# positional, which is annoying for `badge create <spec> -d "..."`).
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -s) SCOPE="$2"; shift 2 ;;
+    -d) DESC="$2"; shift 2 ;;
+    -h) usage ;;
+    --) shift; while [[ $# -gt 0 ]]; do POSITIONAL+=("$1"); shift; done ;;
+    -*) echo "Unknown flag: $1" >&2; usage ;;
+    *)  POSITIONAL+=("$1"); shift ;;
   esac
 done
-shift $((OPTIND - 1))
+set -- ${POSITIONAL+"${POSITIONAL[@]}"}
 
 check_response() {
   local response="$1"
@@ -110,5 +130,66 @@ case "$COMMAND" in
     RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE -H "$AUTH_HEADER" "${UPLOAD_URL}/api/${SCOPE}/${FILENAME}")
     BODY=$(check_response "$RESPONSE" 200)
     echo "Deleted: $(echo "$BODY" | jq -r '.deleted')"
+    ;;
+
+  badge)
+    case "$BADGE_SUB" in
+      create)
+        if [[ $# -ne 1 ]]; then
+          echo "Usage: upload-image badge create <owner/repo#pr> [-d desc]" >&2
+          exit 1
+        fi
+        SPEC="$1"
+        if [[ ! "$SPEC" =~ ^([^/]+)/([^#]+)#([0-9]+)$ ]]; then
+          echo "Error: expected owner/repo#pr, got '$SPEC'" >&2
+          exit 1
+        fi
+        OWNER="${BASH_REMATCH[1]}"
+        REPO="${BASH_REMATCH[2]}"
+        PR="${BASH_REMATCH[3]}"
+
+        if [[ -n "$DESC" ]]; then
+          PAYLOAD=$(jq -nc --arg o "$OWNER" --arg r "$REPO" --argjson p "$PR" --arg d "$DESC" \
+            '{owner:$o,repo:$r,pr:$p,description:$d}')
+        else
+          PAYLOAD=$(jq -nc --arg o "$OWNER" --arg r "$REPO" --argjson p "$PR" \
+            '{owner:$o,repo:$r,pr:$p}')
+        fi
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+          --data "$PAYLOAD" "${UPLOAD_URL}/api/badge")
+        BODY=$(check_response "$RESPONSE" 200)
+        SHIELDS_URL=$(echo "$BODY" | jq -r '.shieldsUrl')
+        echo "$SHIELDS_URL"
+        echo
+        echo "Markdown: ![PR #${PR}](${SHIELDS_URL})"
+        ;;
+
+      list)
+        RESPONSE=$(curl -s -w "\n%{http_code}" -H "$AUTH_HEADER" "${UPLOAD_URL}/api/badge")
+        BODY=$(check_response "$RESPONSE" 200)
+        if [[ -n "$DESC" ]]; then
+          BODY=$(echo "$BODY" | jq --arg q "$DESC" '[.[] | select((.description // "") | contains($q))]')
+        fi
+        echo "$BODY" | jq -r '.[] | [.createdAt, .token, "\(.owner)/\(.repo)#\(.pr)"] + (if .description then [.description] else [] end) | @tsv' | column -t -s $'\t'
+        ;;
+
+      delete)
+        if [[ $# -ne 1 ]]; then
+          echo "Usage: upload-image badge delete <token>" >&2
+          exit 1
+        fi
+        TOKEN="$1"
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE -H "$AUTH_HEADER" "${UPLOAD_URL}/api/badge/${TOKEN}")
+        BODY=$(check_response "$RESPONSE" 200)
+        echo "Deleted: $(echo "$BODY" | jq -r '.deleted')"
+        ;;
+
+      *)
+        echo "Unknown badge subcommand: $BADGE_SUB" >&2
+        usage
+        ;;
+    esac
     ;;
 esac

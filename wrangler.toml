@@ -2,6 +2,11 @@ name = "gh-image-upload"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
+[vars]
+# Comma-separated GitHub login allowlist for the /gist renderer. Empty/unset
+# means render nothing (fail closed). GITHUB_TOKEN stays a secret.
+GIST_OWNER = "philwarren"
+
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "gh-image-upload"
