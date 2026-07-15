@@ -285,8 +285,13 @@ export default {
     // Public badge endpoint for shields.io: GET /badge/:token.json
     // Must run before the generic /:scope/:id.ext serve route below, which
     // would otherwise match /badge/... and reject it as an unknown scope.
+    // Disabled 2026-07-16 along with all other unauthenticated serving — see
+    // the gist route above. The Bearer-authenticated /upload and /api routes
+    // stay live so stored objects can still be listed and deleted.
+    const PUBLIC_SERVING_DISABLED = true;
     const badgeServeMatch = path.match(/^\/badge\/([A-Za-z0-9]+)\.json$/);
     if (badgeServeMatch && (request.method === "GET" || request.method === "HEAD")) {
+      if (PUBLIC_SERVING_DISABLED) return new Response("Not found", { status: 404 });
       const token = badgeServeMatch[1];
       const stored = await env.BUCKET.get(`badge/${token}.json`);
       if (!stored) {
@@ -326,6 +331,7 @@ export default {
     const serveLegacyMatch = path.match(/^\/([a-z0-9-]+)\/([A-Za-z0-9]+\.[a-z]+)$/);
     const serveMatch = serveNewMatch || serveLegacyMatch;
     if (serveMatch && (request.method === "GET" || request.method === "HEAD")) {
+      if (PUBLIC_SERVING_DISABLED) return new Response("Not found", { status: 404 });
       const scope = serveMatch[1];
       const token = serveMatch[2];
 
