@@ -316,7 +316,9 @@ export default {
     // (no scope config) and reject it. Same ordering reason as the badge routes.
     const gistMatch = path.match(/^\/gist\/([a-zA-Z0-9]+)(?:\/([^/]+))?$/);
     if (gistMatch && (request.method === "GET" || request.method === "HEAD")) {
-      return renderGist(gistMatch[1], gistMatch[2], request, env);
+      // Disabled 2026-07-16: serving secret gists on a public URL was flagged as
+      // exposing private information. renderGist is kept below but unreachable.
+      return new Response("Not found", { status: 404 });
     }
 
     // Serve: GET /:scope/:token/:filename (new) or GET /:scope/:id.ext (legacy)
